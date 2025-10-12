@@ -20,7 +20,6 @@ Options:
                     nhk: NHK Radidu
                     radiko: radiko
                     lisradi: ListenRadio
-                    shiburadi: Shibuya no Radio
   -s STATION ID   Station ID
   -d MINUTE       Record minute(s)
   -o FILEPATH     Output file path
@@ -64,11 +63,6 @@ show_all_stations() {
   # ListenRadio
   echo "Record site type: lisradi"
   curl --silent "http://listenradio.jp/service/channel.aspx" | jq -r '.Channel[] | "  " + (.ChannelId | tostring) + ": " + .ChannelName' 2> /dev/null
-  echo ""
-
-  # Shibuya no Radio
-  echo "Record type: shiburadi"
-  echo "  None"
   echo ""
 }
 
@@ -234,17 +228,6 @@ get_hls_uri_lisradi() {
 }
 
 #######################################
-# Get Shibuya no Radio HLS streaming URI
-# Arguments:
-#   None
-# Returns:
-#   None
-#######################################
-get_hls_uri_shiburadi() {
-  curl --silent "https://shibuyanoradio.info/infoapi/?ver=1.1" | jq -r ".basicinfo.hls_playback" 2> /dev/null
-}
-
-#######################################
 # Format time text
 # Arguments:
 #   Time minute
@@ -338,21 +321,14 @@ if [ ${ret} -ne 0 ]; then
   echo "Invalid \"Record minute\"" >&2
   exit 1
 fi
-if [ "${type}" = "shiburadi" ]; then
-  station_id="shiburadi"
-else
-  if [ -z "${station_id}" ]; then
-    # -s value is empty
-    echo "Require \"Station ID\"" >&2
-    exit 1
-  fi
+if [ -z "${station_id}" ]; then
+  # -s value is empty
+  echo "Require \"Station ID\"" >&2
+  exit 1
 fi
 
 # Generate default file path
 file_ext="m4a"
-if [ "${type}" = "shiburadi" ]; then
-  file_ext="mp3"
-fi
 if [ -z "${output}" ]; then
   output="${station_id}_$(date +%Y%m%d%H%M%S).${file_ext}"
 else
@@ -374,9 +350,6 @@ if [ "${type}" = "nhk" ]; then
 elif [ "${type}" = "lisradi" ]; then
   # ListenRadio
   playlist_uri=$(get_hls_uri_lisradi "${station_id}")
-elif [ "${type}" = "shiburadi" ]; then
-  # Shibuya no Radio
-  playlist_uri=$(get_hls_uri_shiburadi)
 elif [ "${type}" = "radiko" ]; then
   # radiko
   radiko_session=""
@@ -422,16 +395,6 @@ if [ "${type}" = "radiko" ]; then
       -acodec copy \
       -vn \
       -bsf:a aac_adtstoasc \
-      -y \
-      -t "$(format_time "${duration}")" \
-      "${output}"
-elif [ "${type}" = "shiburadi" ]; then
-  ffmpeg \
-      -loglevel error \
-      -fflags +discardcorrupt \
-      -i "${playlist_uri}" \
-      -acodec copy \
-      -vn \
       -y \
       -t "$(format_time "${duration}")" \
       "${output}"
