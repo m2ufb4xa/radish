@@ -5,6 +5,10 @@
 # License is MIT (see LICENSE file)
 set -u
 
+# ListenRadio channel-list cache (used when CloudFront blocks curl requests).
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+LISTENRADIO_CACHE="${SCRIPT_DIR}/listenradio_channels.json"
+
 #######################################
 # Show usage
 # Arguments:
@@ -62,7 +66,27 @@ show_all_stations() {
 
   # ListenRadio
   echo "Record site type: lisradi"
-  curl --silent "http://listenradio.jp/service/channel.aspx" | jq -r '.Channel[] | "  " + (.ChannelId | tostring) + ": " + .ChannelName' 2> /dev/null
+  list_file=$(mktemp)
+  if curl --fail --silent --show-error --location \
+      --user-agent "Mozilla/5.0" \
+      --header "Origin: https://listenradio.jp" \
+      --header "Referer: https://listenradio.jp/" \
+      "https://listenradio.jp/service/channellist.aspx?categoryid=10005&offset=0&count=999" \
+      --output "${list_file}" &&
+      jq -e '.Area | type == "array"' "${list_file}" > /dev/null 2>&1; then
+    cp "${list_file}" "${LISTENRADIO_CACHE}"
+  elif [ -s "${LISTENRADIO_CACHE}" ] && jq -e '.Area | type == "array"' "${LISTENRADIO_CACHE}" > /dev/null 2>&1; then
+    echo "  (Using cached channel list: ${LISTENRADIO_CACHE})" >&2
+  else
+    echo "  Cannot retrieve ListenRadio channel list." >&2
+    echo "  curl is blocked or the response format is unexpected." >&2
+    echo "  Save the browser response as ${LISTENRADIO_CACHE} and retry." >&2
+    rm -f "${list_file}"
+    return 1
+  fi
+  jq -r '.Area[] as $area | $area.Channel[] | "  " + (.ChannelId | tostring) + ": " + .ChannelName + " [" + $area.AreaName + "]"' \
+    "${LISTENRADIO_CACHE}"
+  rm -f "${list_file}"
   echo ""
 }
 
@@ -224,7 +248,8 @@ get_hls_uri_radiko() {
 get_hls_uri_lisradi() {
   station_id=$1
 
-  curl --silent "http://listenradio.jp/service/channel.aspx" | jq -r ".Channel[] | select(.ChannelId == ${station_id}) | .ChannelHls" 2> /dev/null
+  # ListenRadio's current HLS URL is derived directly from the Station ID.
+  echo "https://mtist.as.smartstream.ne.jp/${station_id}/livestream/playlist.m3u8"
 }
 
 #######################################
@@ -404,7 +429,7 @@ else
       -fflags +discardcorrupt \
       -http_persistent 0 \
       -user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-      -headers "Origin: http://listenradio.jp" \
+      -headers "$(if [ "${type}" = "lisradi" ]; then printf '%s' 'Origin: https://listenradio.jp'; else printf '%s' 'Origin: http://listenradio.jp'; fi)" \
       -i "${playlist_uri}" \
       -acodec copy \
       -vn \
